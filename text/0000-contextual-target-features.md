@@ -1,4 +1,4 @@
-- Feature Name: generic_target_features
+- Feature Name: contextual_target_features
 - Start Date: (fill me in with today's date, YYYY-MM-DD)
 - RFC PR: [rust-lang/rfcs#0000](https://github.com/rust-lang/rfcs/pull/0000)
 - Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
@@ -6,91 +6,60 @@
 # Summary
 [summary]: #summary
 
-Treat target features as generics, allowing functions to be parameterized by their target features and adjust their implementation accordingly.
-Functions accepting generic target features are annotated with `#[target_feature(caller)]`, which monomorphise to a particular set of target features matching the caller.
-Additionally, provide `is_{arch}_feature_enabled` macros for querying those generic target features.
+Rust's target feature [RFC #2045 initially proposed contextual target features](https://github.com/rust-lang/rfcs/blob/master/text/2045-target-feature.md#conditional-compilation-cfgtarget_feature).
+
+That RFC left the implementation of this behavior unanswered, and in the many years since it was accepted, it has not been possible to implement this behavior.
+
+This RFC extends RFC #2045 with a `#[target_feature(caller)]` attribute and `is_{arch}_feature_enabled!` macro to implement this feature.
 
 # Motivation
 [motivation]: #motivation
 
-When using target features, it's common to provide multiple implementations depending on the features available.
-This can become cumbersome:
+When using target features, it's common to use conditional compilation to modify code based on the available features, using `cfg`:
 
-```rust
-#[cfg(target_arch = "x86_64")]
-#[target_features(enable = "avx2")]
-fn foo_avx2() {
-    ....
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_features(enable = "sse4.1")]
-fn foo_sse41() {
-    ....
-}
-
-#[cfg(target_arch = "aarch64")]
-#[target_features(enable = "sve")]
-fn foo_sve() {
-    ...
-}
-
-fn foo_default() {
-    ...
+```
+if cfg!(target_feature = "avx") {
+    // something fast with AVX
+} else {
+    // some default implementation
 }
 ```
 
-To minimize this, we can conditionally adjust the implementation with `cfg`:
+RFC #2045 proposed that `cfg` would adjust the `target_feature` value depending on the enabled features of the enclosing function.
+However, `cfg` values are now understood to be consistent across an entire crate--when a function is tagged with `#[target_feature(enable = "...")]`, `cfg` does not reflect the enabled features.
+The proposed macro `is_{arch}_feature_enabled!` returns a `bool` indicating if the enclosing function supports a feature.
 
-```rust
-#[target_feature(enable = "avx2")]
-fn caller() {
-    foo()
-}
-
-fn foo() {
-    if cfg!(all(target_arch = "x86_64", target_feature = "avx2)) {
-        /* this avx2 code is never called! */
-    } else {
-        /* this slower code is called instead! */
-    }
-}
-```
-
-This works great, except for one problem--this function is not aware of the `#[target_feature]` attribute.
-When this function is called from a function annotated with `#[target_feature]`, only the base target features are used.
-
-We can try using a generic:
-
-```rust
-#[target_feature(enable = "avx2")]
-fn caller() {
-    foo::<true>()
-}
-
-fn foo<const AVX2: bool>() {
-    if AVX2 {
-        /* this code is now called */
-    } else {
-        /* rather than this slow code */
-    }
-}
-```
-
-Great! The AVX2 implementation is now called.
-Unfortunately, this exposes an implementation detail of `foo` as a generic parameter and requires the caller to set it correctly.
-Even worse, this is a performance pitfall.
-If `foo` is not inlined, it will be compiled with the base target features, rather than the desired `#[target_feature(enable = "avx2")]`.
-This will prevent proper code generation and very likely end up even slower than not using target features at all.
+RFC #2045 also proposed that this `cfg` value would respect inlining and evaluate to the enabled features of the resulting function after inlining.
+This is ultimately not possible to implement because the last inlining step happens long after constants are evaluated.
+The proposed attribute `#[target_feature(caller)]` generates copies of the function with target features matching its caller, hoisting the `is_{arch}_feature_enabled!` computation above any optimizations, while still allowing inlining.
 
 # Guide-level explanation
 [guide-level-explanation]: #guide-level-explanation
 
-This RFC introduces a new function attribute: `#[target_feature(caller)]`.
-This attribute acts like `#[target_feature(enable = ...)]`, but inherits its features from its caller.
+The macro `is_{arch}_feature_enabled!` returns a const bool indicating whether a feature is enabled in the enclosing function. For example:
+```
+#[target_feature(enable = "avx")]
+fn foo() {
+    assert!(is_x86_feature_enabled!("avx"))
+}
+```
 
-Additionally, this RFC introduces a new macro: `is_{arch}_feature_enabled!()`.
-This macro acts like `cfg!(target_feature = ...)`, but interacts with `#[target_feature]` as well as default features available to `cfg`.
+The function attribute `#[target_feature(caller)]` creates copies of the function with its caller's target features enabled. For example:
+```
+#[target_feature(caller)]
+fn has_avx() -> bool {
+    is_x86_feature_enabled!("avx")
+}
+
+fn no_features() {
+    assert!(!has_avx())
+}
+
+#[target_feature(enable = "avx")]
+fn avx_enabled() {
+    assert!(has_avx())
+}
+```
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
