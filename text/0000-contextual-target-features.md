@@ -61,121 +61,81 @@ fn avx_enabled() {
 }
 ```
 
+Unlike `#[target_feature(enable = "...")]`, `#[target_feature(caller)]` can always be marked `#[inline(always)]`.
+
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
 
-Consider the following example:
+The macro `is_{arch}_feature_enabled!` is implemented by an intrinsic.
+After monomorphization, the intrinsic is evaluated to a const `bool`.
 
-```rust
-#[target_feature(enable = "avx2")]
-fn caller_avx2() {
-    callee()
-}
-
-#[target_feature(enable = "sse4.1")]
-fn caller_sse41() {
-    callee()
-}
-
-#[target_feature(caller)]
-fn callee() {
-    if is_x86_feature_enabled!("avx") {
-        ...
-    } else if is_x86_feature_enabled!("sse4.1") {
-        ...
-    } else {
-        ...
-    }
-}
-```
-
-The compiler expands this to something like:
-
-```rust
-#[target_feature(enable = "avx2")]
-fn caller_avx2() {
-    callee::<RustcTargetFeaturesType::AVX2>(),
-}
-
-#[target_feature(enable = "sse4.1")
-fn caller_sse41() {
-    callee::<RustcTargetFeaturesType::SSE41>(),
-}
-
-#[target_feature(enable = /* "avx2", "sse4.1", etc. depending on TARGET_FEATURES */)]
-fn callee<const TARGET_FEATURES: RustcTargetFeaturesType>() {
-    if TARGET_FEATURES.avx2 {
-        ...
-    } else if TARGET_FEATURES.sse41 {
-        ...
-    } else {
-        ...
-    }
-}
-```
-
-The special `#[target_feature(caller)]` attribute adds a generic parameter to the function corresponding to the caller's target features.
-When monomorphized, the appropriate `#[target_feature(enable = "...")]` is added, matching the caller's target features provided in the generic parameter.
-Additionally, the `is_target_feature_enabled` macro can query that generic parameter.
-
-Nested instances of `#[target_feature(caller)]` pass the initial caller's features to all callees.
-
-When called from non-`#[target_feature]` functions, the generic parameter is set to the default target features (set by the target and `-Ctarget-feature`).
-When used in a non-`#[target_feature]` function, `is_target_feature_enabled!(x)` acts like `cfg!(target_feature = x)`.
+Calling a function tagged with the attribute `#[target_feature(caller)]` introduces a new monomorphization of the function with enabled features matching the caller.
 
 # Drawbacks
 [drawbacks]: #drawbacks
 
-- This RFC adds syntax sugar around the already relatively well-understood `#[target_feature]` attribute.
-- Monomorphizing many instances of a function, while unlikely to occur, could be unexpected behavior.
+A user could potentially end up with many monomorphizations if they use many unique target feature sets.
+However, when using many sets of target features, this pattern is likely to be implemented manually and result in a similar binary size.
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-## Conditional compilation
-[RFC #2045](https://github.com/rust-lang/rfcs/pull/2045) proprosed making `#[cfg(target_feature = "feature")]` context-dependent, but this was never implemented.
-`cfg` is always consistent throughout a program, so making it context dependent might be confusing and lead to mistakes.
-Additionally, it's not clear how context-dependent `#[cfg(target_feature = "feature")]` on items (rather than blocks) should or could work.
-Adding a new `is_{arch}_feature_enabled` macro avoids this complexity.
+Some form of conditional compilation based on target features is highly sought after among user of `#[target_feature]`.
+This RFC is designed to be the most minimal implementation necessary to complete the unimplemented features of RFC #2045.
+No fundamental new language features are introduced, and the proposed changes are complementary to existing `#[target_feature]` mechanisms, such as runtime detection and `target_feature_11`.
 
-## Multiversion
-The [`multiversion` crate](https://crates.io/crates/multiversion) uses a macro to write multiple versions of functions for a list of target features.
-A macro is limited to the scope of the annotated function, so it's not possible to select target features based on the caller.
+As a real-world example, consider `std::simd`'s [`swizzle_dyn` function](https://github.com/rust-lang/portable-simd/blob/5523a313b503290a2cf93a956f347695e71f09e4/crates/core_simd/src/swizzle_dyn.rs#L17-L106).
+This function reorders bytes in SIMD vectors using special instructions available in many SIMD extensions represented by a number of target features.
+The current implementation uses `cfg` and has no knowledge of the caller's features.
+On x86-64 this is particularly bad, because the base features don't support any SIMD byte reordering instructions!
+This function is only usable with the relatively obscure `build-std` feature, and is incompatible with runtime feature detection.
+Marking this function with `#[target_feature(caller)]` would allow it to work as intended.
+
+For an example outside the compiler, consider the [`autobahn_hash` crate's `mul_lo_hi` function](https://github.com/calebzulawski/autobahn-hash/blob/f35d18565b996a162d1cfbc18abd268b940f4ced/src/lib.rs#L83-L91).
+This function performs a variation of SIMD multiplication as a basic building block of the hash function.
+The current implementation uses `cfg` to perform an optimization on AArch64 when SVE is not present.
+In this form, the function is not compatible with `#[target_feature(enable = "sve")]`.
+If the hash is inlined into a function with SVE, the suboptimal non-SVE optimization is still used.
+Marking this function (and the rest of the hash functions in the crate) with `#[target_feature(caller)]` would allow calling the hash function in contexts with SVE enabled.
+
+Both of these example functions are very small and intended to be inlined into their callers, which makes runtime detection not an option.
 
 ## RFC #3449
 This design is inspired by my previous attempt at solving the same problem, [RFC #3449: Contextual target feature detection](https://github.com/rust-lang/rfcs/pull/3449).
 
 [Some insightful comments](https://github.com/rust-lang/rfcs/pull/3449#issuecomment-1596335701) raised concerns about the unreliability and complexity of relying on the inliner and backend to evaluate `is_{arch}_feature_enabled` so late in the compilation process.
 
-This RFC resolves that concern by handling the process entirely within MIR.
+This RFC outlines a simpler and more reliable approach that doesn't rely on inlining, but is still compatible with inlining.
 
 ## RFC #3528
-[RFC #3528: Struct target features](https://github.com/rust-lang/rfcs/pull/3525) also proposes representing target features with generics, by using a struct annotated with the enabled target features.
+[RFC #3528: Struct target features](https://github.com/rust-lang/rfcs/pull/3525) also proposes multiple monomorphizations for target features, by using a struct annotated with the enabled target features.
 
-Fundamentally, *struct target features* proposes using `#[target_feature]` without `unsafe`.
-This has already been addressed by the approved and implemented [RFC #2396 (`#[target_feature]` 1.1")](https://github.com/rust-lang/rfcs/pull/2396).
-This RFC, in comparison to *struct target features*, is compatible with TF1.1 and does not intend to replace it.
+The main improvement of this RFC over *struct target features* is that this design introduces a substantially simpler API that covers primarily the same use cases.
 
-Using a struct tagged with `#[target_feature]` also has a few downsides:
-- *Struct target features* requires boilerplate marker structs for each combination of target features. Each crate needs to define structs with the particular combination of features necessary.
-- This RFC leverages the compiler to automatically insert the generic parameter in both the function signature and at the call site--*struct target features* requires adding it manually.
-- `#[target_feature(caller)]` is explicit, readily visible, and universal compared to a struct with an arbitrary name.
-- *Struct target features* needs to reject complex types to avoid soundness problems, e.g. `Option<Feature>` or `Vec<Feature>` cannot prove existence of a target feature.
-- This RFC allows adjusting implementations based on the queried enabled target features. *Struct target features* requires specialization or cumbersome traits with associated consts.
+RFC #3528 supports inheriting target features not from the caller but arbitrarily along the call stack.
+While potentially useful in rare circumstances, the vast majority of situations require the entire call stack below a function to have certain features enabled.
+
+On the other hand, this RFC leverages the compiler to inject target features without requiring the caller to construct a marker type and pass it to the function, resulting in less noisy function signatures that are also appropriate for public interfaces.
+It might be possible to introduce that capability to RFC #3528, but that further complicates an already complicated API.
+
+RFC #3528 also diverges much more substantially from established `#[target_feature]` expectations.
+With the proposed target feature structs, there would be two ways to provide codegen options (types and attributes) and two ways to ensure target feature safety (types and `target_feature_11`).
+In comparison, this RFC is an extension to the RFC that established `#[target_feature]`.
 
 # Prior art
 [prior-art]: #prior-art
 
-While not related to target features, `#[track_caller]` sets a precedent for passing caller information to a function through a parameter embedded by the compiler.
+Clang's `target_clones` attribute and Rust's [`multiversion` crate](https://crates.io/crates/multiversion) create copies of functions with different target features, however these only select the called function by runtime detection.
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-- How should this interact with MIR inlining? Which target features should be used when the caller is inlined into another function?
+Should `#[target_feature(caller)]` polymorphism be implemented with hidden compiler-generated generic parameters, or a new mechanism?
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-- As const generics are improved, the compiler-internal target features type could be exposed.
-- `is_{arch}_feature_detected` could make use of this macro for additional optimization opportunity.
+- A lint could warn when using `cfg` to query target features in a `#[target_feature]` function.
+- An extended form of the attribute could limit which features are inherited, potentially reducing the number of monomorphizations.
+- Runtime detection macros `is_{arch}_feature_detected!` could query `is_{arch}_feature_enabled!` to avoid unnecessary detection.
 - Some form of "compile time `if`" could allow branches to safely call target feature functions using `target_feature_11`
