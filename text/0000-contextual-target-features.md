@@ -6,11 +6,11 @@
 # Summary
 [summary]: #summary
 
-Rust's target feature [RFC #2045 initially proposed contextual target features](https://github.com/rust-lang/rfcs/blob/master/text/2045-target-feature.md#conditional-compilation-cfgtarget_feature).
+Rust's [RFC #2045 initially proposed contextual target features](https://github.com/rust-lang/rfcs/blob/master/text/2045-target-feature.md#conditional-compilation-cfgtarget_feature) for conditional compilation.
 
-That RFC left the implementation of this behavior unanswered, and in the many years since it was accepted, it has not been possible to implement this behavior.
+That RFC left the implementation of this behavior unanswered and in the many years since it was accepted, it has not been possible to implement this behavior.
 
-This RFC extends RFC #2045 with a `#[target_feature(caller)]` attribute and `is_{arch}_feature_enabled!` macro to implement this feature.
+This RFC extends RFC #2045 with a `#[target_feature(caller)]` attribute and `is_{arch}_feature_enabled!` macro to finish adding this capability.
 
 # Motivation
 [motivation]: #motivation
@@ -80,7 +80,7 @@ However, when using many sets of target features, this pattern is likely to be i
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
 
-Some form of conditional compilation based on target features is highly sought after among user of `#[target_feature]`.
+Some form of conditional compilation based on target features is highly sought after among users of `#[target_feature]`.
 This RFC is designed to be the most minimal implementation necessary to complete the unimplemented features of RFC #2045.
 No fundamental new language features are introduced, and the proposed changes are complementary to existing `#[target_feature]` mechanisms, such as runtime detection and `target_feature_11`.
 
