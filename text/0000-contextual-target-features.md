@@ -6,11 +6,11 @@
 # Summary
 [summary]: #summary
 
-Rust's [RFC #2045 initially proposed contextual target features](https://github.com/rust-lang/rfcs/blob/master/text/2045-target-feature.md#conditional-compilation-cfgtarget_feature) for conditional compilation.
+[RFC #2045 initially proposed contextual target features](https://github.com/rust-lang/rfcs/blob/master/text/2045-target-feature.md#conditional-compilation-cfgtarget_feature) for conditional compilation.
+The RFC proposed that `cfg` would indicate features based on the context it is called in, accounting for `#[target_feature]` and `#[inline]`.
+The implementation of this behavior was not specified by the RFC and in the many years since it was accepted, it has not been possible to implement.
 
-That RFC left the implementation of this behavior unanswered and in the many years since it was accepted, it has not been possible to implement this behavior.
-
-This RFC extends RFC #2045 with a `#[target_feature(caller)]` attribute and `is_{arch}_feature_enabled!` macro to finish adding this capability.
+This proposal extends RFC #2045 with a `#[target_feature(caller)]` attribute and `is_{arch}_feature_enabled!` macro to allow implementing conditional compilation as intended.
 
 # Motivation
 [motivation]: #motivation
@@ -26,7 +26,7 @@ if cfg!(target_feature = "avx") {
 ```
 
 RFC #2045 proposed that `cfg` would adjust the `target_feature` value depending on the enabled features of the enclosing function.
-However, `cfg` values are now understood to be consistent across an entire crate--when a function is tagged with `#[target_feature(enable = "...")]`, `cfg` does not reflect the enabled features.
+However, `cfg` values are now understood to be consistent across an entire crate&mdash;when a function is tagged with `#[target_feature(enable = "...")]`, `cfg` does not reflect the enabled features.
 The proposed macro `is_{arch}_feature_enabled!` returns a `bool` indicating if the enclosing function supports a feature.
 
 RFC #2045 also proposed that this `cfg` value would respect inlining and evaluate to the enabled features of the resulting function after inlining.
@@ -82,9 +82,9 @@ However, when using many sets of target features, this pattern is likely to be i
 
 Some form of conditional compilation based on target features is highly sought after among users of `#[target_feature]`.
 This RFC is designed to be the most minimal implementation necessary to complete the unimplemented features of RFC #2045.
-No fundamental new language features are introduced, and the proposed changes are complementary to existing `#[target_feature]` mechanisms, such as runtime detection and `target_feature_11`.
+No fundamentally new language features are introduced, and the proposed changes are complementary to existing `#[target_feature]` mechanisms, such as runtime detection and `target_feature_11`.
 
-As a real-world example, consider `std::simd`'s [`swizzle_dyn` function](https://github.com/rust-lang/portable-simd/blob/5523a313b503290a2cf93a956f347695e71f09e4/crates/core_simd/src/swizzle_dyn.rs#L17-L106).
+For a real-world example, consider `std::simd`'s [`swizzle_dyn` function](https://github.com/rust-lang/portable-simd/blob/5523a313b503290a2cf93a956f347695e71f09e4/crates/core_simd/src/swizzle_dyn.rs#L17-L106).
 This function reorders bytes in SIMD vectors using special instructions available in many SIMD extensions represented by a number of target features.
 The current implementation uses `cfg` and has no knowledge of the caller's features.
 On x86-64 this is particularly bad, because the base features don't support any SIMD byte reordering instructions!
@@ -110,7 +110,7 @@ This RFC outlines a simpler and more reliable approach that doesn't rely on inli
 ## RFC #3528
 [RFC #3528: Struct target features](https://github.com/rust-lang/rfcs/pull/3525) also proposes multiple monomorphizations for target features, by using a struct annotated with the enabled target features.
 
-The main improvement of this RFC over *struct target features* is that this design introduces a substantially simpler API that covers primarily the same use cases.
+The main benefit of this RFC over *struct target features* is that this design introduces a substantially simpler API that covers primarily the same use cases.
 
 RFC #3528 supports inheriting target features not from the caller but arbitrarily along the call stack.
 While potentially useful in rare circumstances, the vast majority of situations require the entire call stack below a function to have certain features enabled.
@@ -120,7 +120,7 @@ It might be possible to introduce that capability to RFC #3528, but that further
 
 RFC #3528 also diverges much more substantially from established `#[target_feature]` expectations.
 With the proposed target feature structs, there would be two ways to provide codegen options (types and attributes) and two ways to ensure target feature safety (types and `target_feature_11`).
-In comparison, this RFC is an extension to the RFC that established `#[target_feature]`.
+In comparison, this RFC is simply an extension to the RFC that established `#[target_feature]`.
 
 # Prior art
 [prior-art]: #prior-art
