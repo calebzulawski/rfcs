@@ -107,18 +107,18 @@ This design is inspired by my previous attempt at solving the same problem, [RFC
 
 This RFC outlines a simpler and more reliable approach that doesn't rely on inlining, but is still compatible with inlining.
 
-## RFC #3528
-[RFC #3528: Struct target features](https://github.com/rust-lang/rfcs/pull/3525) also proposes multiple monomorphizations for target features, by using a struct annotated with the enabled target features.
+## RFC #3525
+[RFC #3525: Struct target features](https://github.com/rust-lang/rfcs/pull/3525) also proposes multiple monomorphizations for target features, by using a struct annotated with the enabled target features.
 
 The main benefit of this RFC over *struct target features* is that this design introduces a substantially simpler API that covers primarily the same use cases.
 
-RFC #3528 supports inheriting target features not from the caller but arbitrarily along the call stack.
+RFC #3525 supports inheriting target features not from the caller but arbitrarily along the call stack.
 While potentially useful in rare circumstances, the vast majority of situations require the entire call stack below a function to have certain features enabled.
 
 On the other hand, this RFC leverages the compiler to inject target features without requiring the caller to construct a marker type and pass it to the function, resulting in less noisy function signatures that are also appropriate for public interfaces.
 It might be possible to introduce that capability to RFC #3528, but that further complicates an already complicated API.
 
-RFC #3528 also diverges much more substantially from established `#[target_feature]` expectations.
+RFC #3525 also diverges much more substantially from established `#[target_feature]` expectations.
 With the proposed target feature structs, there would be two ways to provide codegen options (types and attributes) and two ways to ensure target feature safety (types and `target_feature_11`).
 In comparison, this RFC is simply an extension to the RFC that established `#[target_feature]`.
 
