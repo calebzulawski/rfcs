@@ -116,7 +116,7 @@ RFC #3525 supports inheriting target features not from the caller but arbitraril
 While potentially useful in rare circumstances, the vast majority of situations require the entire call stack below a function to have certain features enabled.
 
 On the other hand, this RFC leverages the compiler to inject target features without requiring the caller to construct a marker type and pass it to the function, resulting in less noisy function signatures that are also appropriate for public interfaces.
-It might be possible to introduce that capability to RFC #3528, but that further complicates an already complicated API.
+It might be possible to introduce that capability to RFC #3525, but that further complicates an already complicated API.
 
 RFC #3525 also diverges much more substantially from established `#[target_feature]` expectations.
 With the proposed target feature structs, there would be two ways to provide codegen options (types and attributes) and two ways to ensure target feature safety (types and `target_feature_11`).
